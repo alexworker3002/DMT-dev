@@ -7,7 +7,8 @@ ext_modules = [
         ["morse_3d.cpp"],
         include_dirs=[pybind11.get_include()],
         language="c++",
-        extra_compile_args=["-O3", "-std=c++14", "-stdlib=libc++"],
+        extra_compile_args=["-O3", "-std=c++17", "-fopenmp"],
+        extra_link_args=["-fopenmp", "-ltbb"],
     ),
 ]
 

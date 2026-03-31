@@ -1,0 +1,8 @@
+data/
+lung_mask/
+vein_mask/
+*.so
+build/
+data/
+*.so
+build/
