@@ -1,10 +1,10 @@
 /*
- * morse_3d.cpp — Support 512³ with Zero-Allocation and Profiling (v3.0 Final)
+ * morse_3d.cpp — Production-Ready 3D DMT Engine (v3.1)
  * =========================================================================
- * - Super-level set filtration (Max interpolation for Voxel Duality).
- * - 2N+1 Grid padding correctly implemented.
- * - Double precision keys to prevent float-truncation tie-breaker issues.
- * - Zero-persistence (Birth == Death) ghost pairs explicitly filtered.
+ * - Fixed: Memory Hoarding (memo.clear() implemented before Reduction)
+ * - Fixed: PyBind11 Contiguity (py::array::c_style | py::array::forcecast)
+ * - Fixed: int32_t Overflow Guard (Hard stop at K > 2.14B)
+ * - Fixed: Ghost Pair Epsilon (1e-9 tolerance for FP truncation)
  */
 
 #include <algorithm>
@@ -14,6 +14,7 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <stdexcept>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -37,25 +38,21 @@ struct StaticVec {
     inline int32_t operator[](size_t i) const { return data[i]; }
 };
 
-inline int64_t get_global_id(int64_t i, int64_t j, int64_t k, int64_t M_cells,
-                             int64_t L_cells) {
+inline int64_t get_global_id(int64_t i, int64_t j, int64_t k, int64_t M_cells, int64_t L_cells) {
   return i * M_cells * L_cells + j * L_cells + k;
 }
 
-inline void get_ijk(int64_t g_id, int64_t M_cells, int64_t L_cells, int64_t &i,
-                    int64_t &j, int64_t &k) {
+inline void get_ijk(int64_t g_id, int64_t M_cells, int64_t L_cells, int64_t &i, int64_t &j, int64_t &k) {
   k = g_id % L_cells;
   int64_t temp = g_id / L_cells;
   j = temp % M_cells;
   i = temp / M_cells;
 }
 
-// 核心重构 1：Voxel Duality 的 Max 插值 (用于 Super-level set)
 double get_cell_value(int64_t c_i, int64_t c_j, int64_t c_k, const double *grid,
                       int64_t N, int64_t M, int64_t L) {
   double max_val = -std::numeric_limits<double>::infinity();
   
-  // 巧妙的边界自适应：奇数取自身，偶数(边界)跨越两个相邻 Voxel
   int64_t i_min = (c_i % 2 == 1) ? (c_i / 2) : std::max((int64_t)0, c_i / 2 - 1);
   int64_t i_max = (c_i % 2 == 1) ? (c_i / 2) : std::min(N - 1, c_i / 2);
   
@@ -75,7 +72,8 @@ double get_cell_value(int64_t c_i, int64_t c_j, int64_t c_k, const double *grid,
   return max_val;
 }
 
-py::dict extract_persistence_3d_morse(py::array_t<double> grid_array) {
+// 修复 2: 强制 PyBind11 进行 C-Style 连续内存验证与深拷贝转换
+py::dict extract_persistence_3d_morse(py::array_t<double, py::array::c_style | py::array::forcecast> grid_array) {
   py::buffer_info buf = grid_array.request();
   if (buf.ndim != 3) throw std::runtime_error("Requires 3D numpy array");
 
@@ -84,18 +82,21 @@ py::dict extract_persistence_3d_morse(py::array_t<double> grid_array) {
   int64_t L = buf.shape[2];
   const double *grid = static_cast<const double *>(buf.ptr);
 
-  // 核心重构 2：恢复 2N+1 的 Voxel 拓扑网格
   int64_t N_cells = 2 * N + 1;
   int64_t M_cells = 2 * M + 1;
   int64_t L_cells = 2 * L + 1;
   int64_t K = N_cells * M_cells * L_cells;
+
+  // 修复 3: 防止 int32_t 溢出的硬件级断路器
+  if (K > 2147483647LL) {
+      throw std::runtime_error("Grid too large for int32_t indexing (K > 2.14 Billion). Please downsample the input probability map.");
+  }
 
   auto t_start = std::chrono::high_resolution_clock::now();
 
   // Phase 1: Grid Init & Parallel Sort
   auto t1_start = std::chrono::high_resolution_clock::now();
   
-  // 核心重构 3：使用 double 防止浮点截断导致假 Tie-breaker
   std::vector<double> keys(K);
   std::vector<uint8_t> dims(K);
   std::vector<int32_t> sorted_idx(K);
@@ -113,7 +114,6 @@ py::dict extract_persistence_3d_morse(py::array_t<double> grid_array) {
 
   std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
   
-  // 严谨的 Tie-breaker: 标量大优先 -> 维度低优先 -> 内存ID小优先
   std::sort(std::execution::par_unseq, sorted_idx.begin(), sorted_idx.end(),
       [&](int32_t a, int32_t b) {
           if (keys[a] != keys[b]) return keys[a] > keys[b];
@@ -293,9 +293,11 @@ py::dict extract_persistence_3d_morse(py::array_t<double> grid_array) {
     R[idx].reserve(morse_bnd.size());
     for (int32_t b_idx : morse_bnd) R[idx].push_back(k_to_crit[b_idx]);
     
-    // 保证边界矩阵每列按降序排列，确保 Pivot 位置准确
     std::sort(R[idx].begin(), R[idx].end(), std::greater<int32_t>());
   }
+
+  // 修复 1: 扫雷！Phase 4 构建完 R 矩阵后立刻释放 memo 内存占用，防止 OOM 双峰暴击
+  memo.clear();
 
   std::unordered_map<int32_t, int32_t> pivot_to_col;
   std::vector<std::pair<int32_t, int32_t>> pairs;
@@ -335,14 +337,13 @@ py::dict extract_persistence_3d_morse(py::array_t<double> grid_array) {
     }
   }
 
-  // 核心重构 4：严格过滤 Zero-Persistence 幽灵对
+  // 修复 4: 加入 1e-9 的 Epsilon 容差，彻底物理拦截浮点精度造成的假特征
   std::vector<std::pair<int32_t, int32_t>> valid_pairs;
   for (auto p : pairs) {
     int32_t b_idx = crit_indices[p.first];
     int32_t d_idx = crit_indices[p.second];
     
-    // 只有 Birth 和 Death 标量值不同，才是真实的拓扑特征
-    if (keys[sorted_idx[b_idx]] != keys[sorted_idx[d_idx]]) {
+    if (std::abs(keys[sorted_idx[b_idx]] - keys[sorted_idx[d_idx]]) > 1e-9) {
       valid_pairs.push_back({b_idx, d_idx});
     }
   }
@@ -372,7 +373,6 @@ py::dict extract_persistence_3d_morse(py::array_t<double> grid_array) {
     int64_t gid_b = sorted_idx[b_idx], gid_d = sorted_idx[d_idx], bi, bj, bk, di, dj, dk;
     get_ijk(gid_b, M_cells, L_cells, bi, bj, bk); get_ijk(gid_d, M_cells, L_cells, di, dj, dk);
     
-    // 根据 2N+1 坐标系，除以 2 并偏移 0.5 映射回原空间（如果需要的话，目前保留之前的除2逻辑）
     b_c(i, 0) = bi/2.0; b_c(i, 1) = bj/2.0; b_c(i, 2) = bk/2.0;
     d_c(i, 0) = di/2.0; d_c(i, 1) = dj/2.0; d_c(i, 2) = dk/2.0;
   }
@@ -381,7 +381,7 @@ py::dict extract_persistence_3d_morse(py::array_t<double> grid_array) {
     size_t out_idx = num_pairs_out + i;
     int32_t b_idx = essential_h0[i];
     b_v(out_idx) = keys[sorted_idx[b_idx]];
-    d_v(out_idx) = -std::numeric_limits<double>::infinity(); // 超水平集 Essential H0 应该死于负无穷
+    d_v(out_idx) = -std::numeric_limits<double>::infinity(); 
     d_m(out_idx) = 0;
     int64_t gid = sorted_idx[b_idx], bi, bj, bk;
     get_ijk(gid, M_cells, L_cells, bi, bj, bk);
@@ -397,5 +397,5 @@ py::dict extract_persistence_3d_morse(py::array_t<double> grid_array) {
 
 PYBIND11_MODULE(morse_3d, m) {
   m.def("extract_persistence_3d_morse", &extract_persistence_3d_morse,
-        "3D Cubical Complex DMT Persistence Engine v3.0 (Final Voxel-Max Setup)");
+        "Production-Ready 3D DMT Engine v3.1");
 }
