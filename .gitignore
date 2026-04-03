@@ -6,3 +6,6 @@ build/
 data/
 *.so
 build/
+*.txt
+*.log
+__pycache__/
