@@ -30,12 +30,12 @@ def generate_topological_uq_map(dmt_res: dict, prob_map: np.ndarray, tau: float 
         print("  幻觉特征数量为 0。")
         return np.zeros(original_shape, dtype=np.float32)
         
-    # ================= 核心升级：宽带门控双重加权 =================
+    # ================= 核心升级：熵调制双重加权 =================
     
     # 2A. 计算持久度能量 (采用 L1 线性惩罚，保留所有真实存在的断裂权重)
     energy = (h_births - h_deaths)
     
-    # 2B. 宽带概率门控 (Broadband Probability Gating)
+    # 2B. 熵调制 (Entropy Modulation) — 废弃宽带门控，改用连续的香农熵作为权重调节因子
     # 安全取整并限制越界以获取对应坐标的概率 p
     cz = np.clip(np.floor(h_birth_coords[:, 0]).astype(int), 0, original_shape[0] - 1)
     cy = np.clip(np.floor(h_birth_coords[:, 1]).astype(int), 0, original_shape[1] - 1)
@@ -43,11 +43,14 @@ def generate_topological_uq_map(dmt_res: dict, prob_map: np.ndarray, tau: float 
     
     p = prob_map[cz, cy, cx]
     
-    # 只要不是绝对背景 (< 0.01) 且不是绝对前景 (> 0.99)，全额放行该拓扑噪点
-    gate = ((p > 0.01) & (p < 0.99)).astype(np.float32)
+    # 香农熵：H(p) = -p*log(p) - (1-p)*log(1-p)
+    # • 当 p→0 或 p→1（绝对背景/前景）时，H(p)→0，权重被自然压制
+    # • 当 p≈0.5（决策边界）时，H(p)→ln(2)≈0.693，权重被最大化激活
+    # • 相比宽带门控，背景处 p=0.05 的权重为 H(0.05)≈0.286，而非1.0
+    entropy = -p * np.log(p + 1e-9) - (1 - p) * np.log(1 - p + 1e-9)
     
-    # 2C. 融合权重：将代数拓扑势能与空间概率门控绑定
-    weights = energy * gate
+    # 2C. 融合权重：将代数拓扑势能与连续信息熵绑定
+    weights = energy * entropy
     
     # 因为下面将 Birth 和 Death 坐标 vstack 在了一起，权重数组也需要复制拼接到同等长度
     all_weights = np.concatenate((weights, weights))
