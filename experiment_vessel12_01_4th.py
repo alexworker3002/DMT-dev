@@ -1,4 +1,5 @@
 import numpy as np
+import nibabel as nib
 import morse_3d
 import time
 import os
@@ -47,7 +48,7 @@ def generate_topological_uq_map(dmt_res: dict, prob_map: np.ndarray, tau: float 
     
     # 2B. 指数级熵调制 (Exponential Entropy Modulation)
     # 引入 Gamma 指数来执行非线性的噪声衰减。建议值 2.0。
-    gamma = 1.2
+    gamma = 2.0
     
     # 获取对应坐标处的概率 p (安全取整并限制越界)
     cz = np.clip(np.floor(h_birth_coords[:, 0]).astype(int), 0, original_shape[0] - 1)
@@ -126,24 +127,31 @@ def generate_topological_uq_map(dmt_res: dict, prob_map: np.ndarray, tau: float 
         # 裁剪并归一化到 [0, 1] 空间
         uq_map = np.clip(uq_map / (vmax + 1e-9), 0.0, 1.0)
     # ==========================================================
-        
+
+    # ================= 空间校准：几何掩码 (Geometry Masking) =================
+    # 切除悬浮在绝对背景 (p <= 0.05) 中的高斯拖尾，强制高光贴合解剖学结构
+    geometry_mask = (prob_map > 0.05).astype(np.float32)
+    uq_map = uq_map * geometry_mask
+    # =========================================================================
+
     return uq_map
 
 def main():
-    data_path = "/home/DMT_dev/data/vessel12_01/vessel12_01_prob.npz"
+    data_path = "/home/DMT_dev/data/vessel12_01_3rd/vessel12_01_prob_quantized.nii.gz"
     if not os.path.exists(data_path):
         print(f"错误: 找不到文件 {data_path}")
         return
         
-    print(f"1. 加载概率图数据: {data_path}")
-    data = np.load(data_path)
+    print(f"1. 加载 NIfTI 概率图数据: {data_path}")
+    img = nib.load(data_path)
+    data = img.get_fdata()
     
-    if 'probabilities' not in data:
-        print("错误: NPZ 文件不包含 'probabilities' 键")
-        return
-        
-    # 获取前景概率 (假设索引 1 是血管前景)
-    prob_map = data['probabilities'][1]
+    # 如果原始文件带通道（前向实验），确保兼容提取通道逻辑
+    # 因为上一轮我们量化的文件已经被提取过了单通道，所以可以直接作为 prob_map
+    if len(data.shape) == 4 and data.shape[-1] >= 2:
+        prob_map = data[..., 1]
+    else:
+        prob_map = data
     
     if not np.issubdtype(prob_map.dtype, np.floating):
         prob_map = prob_map.astype(np.float64)
@@ -168,18 +176,25 @@ def main():
     uq_heatmap = generate_topological_uq_map(
         dmt_res=dmt_res,
         prob_map=prob_map,
-        tau=0.15,
-        sigma=2.0
+        tau=0.10, # 在上一轮中已经使用过 tau=0.10 获取更多细节，此处保持一致或依据您需要调整。
+        sigma=1.0  # 将高斯核标准差减半，让高光更锐利
     )
     t3 = time.time()
     
     print(f"  THE生成耗时: {t3 - t2:.2f} 秒")
     print(f"  THE Heatmap 数值范围: [{uq_heatmap.min():.4f}, {uq_heatmap.max():.4f}]")
     
-    # 保存结果
-    out_path = "/home/DMT_dev/data/vessel12_01/vessel12_01_uq.npz"
-    print(f"\n4. 保存THE结果到: {out_path}")
-    np.savez_compressed(out_path, uq_map=uq_heatmap)
+    # 保存结果为主流 NIfTI 格式
+    out_path = "/home/DMT_dev/data/vessel12_01_3rd/vessel12_01_uq_4th.nii.gz"
+    print(f"\n4. 保存 THE 结果为 NIfTI 格式到: {out_path}")
+    
+    out_img = nib.Nifti1Image(uq_heatmap.astype(np.float32), affine=img.affine, header=img.header)
+    nib.save(out_img, out_path)
+    
+    # 如果还需要顺手保存一个 .npz 文件，可解除注释：
+    # npz_out_path = "/home/DMT_dev/data/vessel12_01_3rd/vessel12_01_uq_4th.npz"
+    # np.savez_compressed(npz_out_path, uq_map=uq_heatmap)
+    
     print("  完成！")
 
 if __name__ == "__main__":
