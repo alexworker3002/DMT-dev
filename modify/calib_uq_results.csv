@@ -1,0 +1,13 @@
+Method,ECE,Brier,Lambda,UQ_file
+Raw prob_map,0.02219230377351026,0.019193077459931374,-,-
+Temperature Scaling (T=1.581),0.028814880839260135,0.01810511064415483,-,-
+"UQ-Calib (λ=0.1, uq_4th.nii.gz)",0.02217589506813618,0.019180867820978165,0.1,vessel12_01_uq_4th.nii.gz
+"UQ-Calib (λ=0.5, uq_4th.nii.gz)",0.022110612725820947,0.01914306916296482,0.5,vessel12_01_uq_4th.nii.gz
+"UQ-Calib (λ=1.0, uq_4th.nii.gz)",0.022029046414580682,0.019120430573821068,1.0,vessel12_01_uq_4th.nii.gz
+"UQ-Calib (λ=2.0, uq_4th.nii.gz)",0.021935973720867773,0.019092148169875145,2.0,vessel12_01_uq_4th.nii.gz
+"UQ-Calib (λ=5.0, uq_4th.nii.gz)",0.021771837882429694,0.01905461587011814,5.0,vessel12_01_uq_4th.nii.gz
+"UQ-Calib (λ=0.1, uq_exp_tau0.1.nii.gz)",0.022140965606837718,0.019154131412506104,0.1,vessel12_01_uq_exp_tau0.1.nii.gz
+"UQ-Calib (λ=0.5, uq_exp_tau0.1.nii.gz)",0.021935667912349553,0.019033534452319145,0.5,vessel12_01_uq_exp_tau0.1.nii.gz
+"UQ-Calib (λ=1.0, uq_exp_tau0.1.nii.gz)",0.021679239646729638,0.01896238513290882,1.0,vessel12_01_uq_exp_tau0.1.nii.gz
+"UQ-Calib (λ=2.0, uq_exp_tau0.1.nii.gz)",0.02137947296351981,0.01889236830174923,2.0,vessel12_01_uq_exp_tau0.1.nii.gz
+"UQ-Calib (λ=5.0, uq_exp_tau0.1.nii.gz)",0.0208541183781729,0.018814081326127052,5.0,vessel12_01_uq_exp_tau0.1.nii.gz
