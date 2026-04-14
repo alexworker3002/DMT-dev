@@ -118,7 +118,7 @@ def generate_hybrid_topological_uq(prob_map, dmt_res, tau=0.15, hessian_sigma=1.
     p = np.clip(prob_map.astype(np.float32), 0.0, 1.0) # 严防插值越界导致 log(NaN)
     raw_entropy = -p * np.log(p + 1e-9) - (1 - p) * np.log(1 - p + 1e-9)
     # 引入 Gamma=2.0，对熵进行非线性锐化
-    entropy_weight = (raw_entropy / np.log(2.0)) ** 2.0 
+    entropy_weight = (raw_entropy / np.log(2.0)) ** 1.0 
     
     print("    [+] 张量融合: Energy × Geometry × Entropy...")
     hybrid_uq = dmt_energy * hessian_geometry * entropy_weight
